@@ -305,6 +305,41 @@ const Cloud = (() => {
     setPhase('idle');
   }
 
+  /* ---------- Notificaciones (Etapa 3) ---------- */
+  async function savePushSubscription(json) {
+    if (!sb || !session) throw new Error('Inicia sesión para activar los avisos.');
+    const { error } = await sb.from('push_subscriptions').upsert({
+      user_id: session.user.id,
+      endpoint: json.endpoint,
+      p256dh: json.keys.p256dh,
+      auth: json.keys.auth,
+      user_agent: navigator.userAgent.slice(0, 200),
+    }, { onConflict: 'endpoint' });
+    if (error) throw new Error(friendlyError(error));
+  }
+
+  async function deletePushSubscription(endpoint) {
+    if (!sb || !session) return;
+    const { error } = await sb.from('push_subscriptions').delete().eq('endpoint', endpoint);
+    if (error) throw new Error(friendlyError(error));
+  }
+
+  // Llama a la función "enviar-avisos" de Supabase y traduce los errores.
+  async function callFunction(action) {
+    if (!sb) throw new Error(problem);
+    let res;
+    try { res = await sb.functions.invoke('enviar-avisos', { body: { action } }); }
+    catch (err) { throw new Error(friendlyError(err)); }
+    if (!res.error) return res.data || {};
+    let body = null;
+    try { body = await res.error.context?.json(); } catch { /* sin cuerpo */ }
+    const status = res.error.context?.status;
+    if (body?.error) throw new Error(body.error);
+    if (status === 404) throw new Error('No encontré la función «enviar-avisos» en Supabase. Revisa que se llame exactamente así.');
+    if (status === 401) throw new Error('La función tiene activado «Verify JWT». Desactívalo en Supabase → Edge Functions → enviar-avisos.');
+    throw new Error(isNetworkError(res.error) ? 'Sin conexión a internet.' : 'La función de avisos no respondió. Revisa su configuración en Supabase.');
+  }
+
   /* ---------- Arranque ---------- */
   async function init() {
     if (!sb) { emit('status'); return; }
@@ -332,6 +367,9 @@ const Cloud = (() => {
     signUp,
     signIn,
     signOut,
+    savePushSubscription,
+    deletePushSubscription,
+    callFunction,
     available: () => !!sb,
     problem: () => problem,
     signedIn: () => !!session,

@@ -14,6 +14,9 @@ Fase 1: funciona 100 % en tu teléfono, sin servidor y sin costo.
 | `config.js` | URL y clave publishable de tu proyecto de Supabase |
 | `vendor/supabase.js` | Librería oficial de Supabase (v2.117.3, licencia MIT) |
 | `supabase/01_esquema.sql` | Tablas y reglas de seguridad de la base de datos |
+| `supabase/02_avisos.sql` | Reloj de avisos cada minuto y limpieza diaria |
+| `supabase/functions/enviar-avisos/index.ts` | Función que decide y envía las notificaciones |
+| `herramientas/generar-llaves.html` | Genera las llaves de notificaciones (se abre con doble clic) |
 | `sw.js` | Hace que funcione sin internet (y en la Fase 2, recibirá notificaciones) |
 | `manifest.webmanifest` | Nombre, colores e íconos de la app instalada |
 | `icons/` | Íconos para la pantalla de inicio |
@@ -57,6 +60,16 @@ Actualizar nunca borra tus hábitos ni tu racha.
 
 La app funciona sin internet y sube los cambios cuando vuelve la conexión. Si un dato cambió en dos lugares, gana el más reciente.
 
-## Próximo paso
+## Notificaciones (Fase 2, etapa 3)
 
-- Notificaciones push con tu nombre (requiere iOS 16.4 o superior y la app instalada en inicio).
+Requieren iOS 16.4 o superior y abrir la app desde el ícono de inicio.
+
+- Revisar la configuración: abre `https://TU-PROYECTO.supabase.co/functions/v1/enviar-avisos` en el navegador. Debe decir `"estado": "listo"`.
+- Revisar el reloj (SQL Editor):
+  `select status_code, content from net._http_response order by created desc limit 5;`
+  200 = bien · 401 = desactiva «Verify JWT» en la función · 404 = la función no se llama `enviar-avisos`.
+- Las llaves privadas y el CRON_SECRET viven solo en Supabase → Edge Functions → Secrets. Nunca en GitHub.
+
+## Nota para trabajar con Claude
+
+Cuando pidas cambios, recuérdale: «Incluye siempre `sw.js` con la versión incrementada y no me reemplaces `config.js`».

@@ -1,7 +1,7 @@
 /* HabitFlow: service worker
    ⚠️ Cada vez que publiques cambios, sube el número de VERSION
    (1.0.1 → 1.0.2 → 1.0.3...). Así el iPhone sabe que hay una versión nueva. */
-const VERSION = 'habitflow-v1.1.0';
+const VERSION = 'habitflow-v1.2.0';
 const ASSETS = [
   './',
   './index.html',
@@ -75,6 +75,7 @@ self.addEventListener('push', event => {
       body: data.body || 'Tu rutina te espera 🔥',
       icon: './icons/icon-192.png',
       badge: './icons/icon-192.png',
+      tag: data.tag || undefined,
       data: { url: data.url || './' },
     })
   );

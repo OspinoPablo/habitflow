@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HabitFlow · Generador de llaves</title>
+  <style>
+    :root { color-scheme: dark; --bg: #100D12; --card: #1A161C; --line: rgba(255,240,230,.1); --text: #F6EFE8; --muted: #A59BA8; --fire: linear-gradient(135deg, #FF4A1C, #FF9A3C 55%, #FFD27A); --warn: #FFC08C; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px 48px; background: radial-gradient(90% 40% at 50% 0%, rgba(255,91,46,.16), transparent 60%), var(--bg); color: var(--text); font: 16px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 680px; margin: 0 auto; }
+    h1 { margin: 0 0 6px; font-size: 30px; letter-spacing: -.02em; }
+    p { color: var(--muted); margin: 0 0 16px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 20px; margin: 20px 0; }
+    label { display: block; font-weight: 600; margin-bottom: 8px; }
+    input { width: 100%; padding: 14px 16px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; }
+    button { font: inherit; font-weight: 700; border: 0; border-radius: 12px; padding: 12px 18px; cursor: pointer; }
+    .primary { width: 100%; margin-top: 14px; background: var(--fire); color: #2A0D00; min-height: 52px; }
+    .row { margin-top: 18px; }
+    .row h2 { font-size: 15px; margin: 0 0 2px; font-family: ui-monospace, Consolas, monospace; }
+    .row small { display: block; color: var(--muted); margin-bottom: 8px; }
+    .val { display: flex; gap: 8px; }
+    .val code { flex: 1; min-width: 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; font: 13px/1.4 ui-monospace, Consolas, monospace; word-break: break-all; }
+    .copy { background: rgba(255,240,230,.08); color: var(--text); flex: none; }
+    .secret h2::after { content: " · secreta"; color: var(--warn); font-family: -apple-system, "Segoe UI", sans-serif; font-weight: 600; }
+    .note { border-left: 3px solid #FF9A3C; padding: 10px 14px; background: rgba(255,154,60,.07); border-radius: 0 12px 12px 0; color: var(--text); }
+    .error { color: #FF9BA5; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Generador de llaves 🔥</h1>
+    <p>Crea las llaves que Apple exige para aceptar las notificaciones de HabitFlow. Todo se calcula aquí, en tu computador: nada se envía a internet.</p>
+
+    <div class="card">
+      <label for="email">Tu correo</label>
+      <input id="email" type="email" placeholder="tu@correo.com" autocomplete="email">
+      <p style="margin:8px 0 0;font-size:14px">Apple lo usa solo como contacto técnico si hubiera un problema con tus avisos.</p>
+      <button class="primary" id="go">Generar llaves</button>
+      <p class="error" id="err" hidden></p>
+    </div>
+
+    <div class="card" id="out" hidden>
+      <p class="note">Guarda estos 4 valores en un lugar seguro (por ejemplo, un gestor de contraseñas). Las secretas <b>nunca</b> van a GitHub ni a la app.</p>
+
+      <div class="row">
+        <h2>VAPID_PUBLIC_KEY</h2>
+        <small>Va como secreto en Supabase. Es pública: la app la pide sola.</small>
+        <div class="val"><code id="pub"></code><button class="copy" data-copy="pub">Copiar</button></div>
+      </div>
+      <div class="row secret">
+        <h2>VAPID_PRIVATE_KEY</h2>
+        <small>Va como secreto en Supabase.</small>
+        <div class="val"><code id="priv"></code><button class="copy" data-copy="priv">Copiar</button></div>
+      </div>
+      <div class="row">
+        <h2>VAPID_SUBJECT</h2>
+        <small>Va como secreto en Supabase.</small>
+        <div class="val"><code id="sub"></code><button class="copy" data-copy="sub">Copiar</button></div>
+      </div>
+      <div class="row secret">
+        <h2>CRON_SECRET</h2>
+        <small>Va como secreto en Supabase <b>y</b> en la sección 2 de 02_avisos.sql.</small>
+        <div class="val"><code id="cron"></code><button class="copy" data-copy="cron">Copiar</button></div>
+      </div>
+      <button class="primary" id="all">Copiar los 4 valores juntos</button>
+      <p style="margin:16px 0 0;font-size:14px">Si vuelves a generar llaves, tendrás que actualizar los secretos en Supabase y activar de nuevo las notificaciones en el iPhone.</p>
+    </div>
+  </main>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const b64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+    $('go').addEventListener('click', async () => {
+      const email = $('email').value.trim();
+      $('err').hidden = true;
+      if (!/^\S+@\S+\.\S+$/.test(email)) { $('err').textContent = 'Escribe un correo válido.'; $('err').hidden = false; return; }
+      if (!window.crypto?.subtle) { $('err').textContent = 'Abre este archivo con Chrome o Edge actualizados.'; $('err').hidden = false; return; }
+      const keys = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+      $('pub').textContent = b64u(await crypto.subtle.exportKey('raw', keys.publicKey));
+      $('priv').textContent = (await crypto.subtle.exportKey('jwk', keys.privateKey)).d;
+      $('sub').textContent = `mailto:${email}`;
+      $('cron').textContent = b64u(crypto.getRandomValues(new Uint8Array(32)));
+      $('out').hidden = false;
+      $('out').scrollIntoView({ behavior: 'smooth' });
+    });
+
+    async function copy(text, btn) {
+      await navigator.clipboard.writeText(text);
+      const old = btn.textContent; btn.textContent = 'Copiado ✓'; setTimeout(() => (btn.textContent = old), 1500);
+    }
+    document.addEventListener('click', e => {
+      const id = e.target.dataset?.copy;
+      if (id) copy($(id).textContent, e.target);
+    });
+    $('all').addEventListener('click', e => copy(
+      ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT', 'CRON_SECRET']
+        .map((n, i) => `${n}=${$(['pub', 'priv', 'sub', 'cron'][i]).textContent}`).join('\n'), e.target));
+  </script>
+</body>
+</html>

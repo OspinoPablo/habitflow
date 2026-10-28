@@ -177,6 +177,9 @@ const cloud = typeof Cloud !== 'undefined' ? Cloud : {
   signUp: async () => ({ error: 'Sincronización no disponible.' }),
   signIn: async () => ({ error: 'Sincronización no disponible.' }),
   signOut: async () => {},
+  savePushSubscription: async () => { throw new Error('Sincronización no disponible.'); },
+  deletePushSubscription: async () => {},
+  callFunction: async () => { throw new Error('Sincronización no disponible.'); },
   available: () => false, problem: () => 'Falta el archivo sync.js.', signedIn: () => false, email: () => '',
   status: () => ({ phase: 'idle', error: '', lastSyncAt: 0, pending: 0 }),
 };
@@ -762,16 +765,9 @@ function renderProfile() {
 
     ${accountCard()}
 
-    <div class="card">
-      <div class="card-head">${icon('bell')}<h2>Recordatorio diario</h2></div>
-      <p class="card-text">Mientras llegan las notificaciones dentro de la app, crea un recordatorio con la app <b>Atajos</b> de tu iPhone. Es gratis y toma un minuto:</p>
-      <ol class="steps">
-        <li>Abre <b>Atajos</b>, ve a <b>Automatización</b> y crea una nueva.</li>
-        <li>Elige <b>Hora del día</b>, pon la hora y haz que se ejecute de inmediato.</li>
-        <li>Agrega la acción <b>Mostrar notificación</b> y pega este mensaje:</li>
-      </ol>
-      <div class="quote" id="pf-reminder">${esc(reminderText(name))}</div>
-      <button class="btn btn-ghost btn-block" data-action="copy-reminder">${icon('copy')}Copiar mensaje</button>
+    <div class="card" id="notif-card">
+      <div class="card-head">${icon('bell')}<h2>Notificaciones</h2></div>
+      <div id="notif-body"><p class="card-text">Revisando…</p></div>
     </div>
 
     <div class="card">
@@ -786,7 +782,162 @@ function renderProfile() {
       </div>
     </div>
 
-    <p class="footnote center">HabitFlow <span id="pf-version">1.1</span>. Usándola desde el ${fmt(dateOf(state.meta.startDate), { day: 'numeric', month: 'long', year: 'numeric' })}, con ${activeN} ${activeN === 1 ? 'hábito activo' : 'hábitos activos'}.</p>`;
+    <p class="footnote center">HabitFlow <span id="pf-version">1.2</span>. Usándola desde el ${fmt(dateOf(state.meta.startDate), { day: 'numeric', month: 'long', year: 'numeric' })}, con ${activeN} ${activeN === 1 ? 'hábito activo' : 'hábitos activos'}.</p>`;
+  refreshNotifCard();
+}
+
+/* ---------- Notificaciones push (Etapa 3) ---------- */
+const NOTIF_DEFAULTS = { habits: true, summary: true, summaryTime: '08:00', streak: true, streakTime: '21:00' };
+const notifPrefs = () => ({ ...NOTIF_DEFAULTS, ...((state.settings && state.settings.notif) || {}) });
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error('La app tardó demasiado en responder. Ciérrala y ábrela de nuevo.')), ms))]);
+
+function urlB64ToBytes(s) {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4);
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
+async function currentSubscription() {
+  if (!pushSupported()) return null;
+  try {
+    const reg = await withTimeout(navigator.serviceWorker.ready, 4000);
+    return await reg.pushManager.getSubscription();
+  } catch { return null; }
+}
+
+function shortcutsHtml() {
+  return `
+    <ol class="steps">
+      <li>Abre <b>Atajos</b>, ve a <b>Automatización</b> y crea una nueva.</li>
+      <li>Elige <b>Hora del día</b>, pon la hora y haz que se ejecute de inmediato.</li>
+      <li>Agrega la acción <b>Mostrar notificación</b> y pega este mensaje:</li>
+    </ol>
+    <div class="quote" id="pf-reminder">${esc(reminderText(state.user.name))}</div>
+    <button class="btn btn-ghost btn-block" data-action="copy-reminder">${icon('copy')}Copiar mensaje</button>`;
+}
+
+function prefRow(key, title, desc, on, timeKey, time) {
+  return `
+    <div class="pref">
+      <div class="pref-text">
+        <strong>${title}</strong>
+        <span>${desc}</span>
+        ${timeKey ? `<input class="input input-time" type="time" data-pref-time="${timeKey}" value="${time}" ${on ? '' : 'disabled'} aria-label="Hora: ${title}">` : ''}
+      </div>
+      <label class="switch"><input type="checkbox" data-pref="${key}" ${on ? 'checked' : ''} aria-label="${title}"><span></span></label>
+    </div>`;
+}
+
+async function notifCardHtml() {
+  if (!pushSupported()) {
+    if (isIOS() && !isStandalone()) {
+      return '<p class="card-text">Para recibir avisos, abre HabitFlow desde el ícono de tu pantalla de inicio (no desde Safari).</p>';
+    }
+    return `<p class="card-text">Este dispositivo no admite notificaciones de la app. En iPhone necesitas iOS 16.4 o superior y abrirla desde el ícono. Mientras tanto, crea un recordatorio con la app <b>Atajos</b>:</p>${shortcutsHtml()}`;
+  }
+  if (!cloud.signedIn()) {
+    return '<p class="card-text">Inicia sesión arriba para activar los avisos. Los envía tu servidor de Supabase, así llegan aunque la app esté cerrada.</p>';
+  }
+  if (Notification.permission === 'denied') {
+    return '<p class="card-text">Los avisos de HabitFlow están bloqueados. Para activarlos ve a <b>Ajustes → Notificaciones → HabitFlow</b> y permite las notificaciones.</p>';
+  }
+  const sub = await currentSubscription();
+  if (!sub) {
+    return `
+      <p class="card-text">Recibe un aviso a la hora de cada hábito, un resumen diario y una alerta cuando tu racha esté en riesgo, aunque la app esté cerrada.</p>
+      <button class="btn btn-primary btn-block" data-action="notif-enable">${icon('bell')}Activar notificaciones</button>`;
+  }
+  const p = notifPrefs();
+  return `
+    <div class="prefs">
+      ${prefRow('habits', 'A la hora de cada hábito', 'Solo si todavía no lo marcaste.', p.habits)}
+      ${prefRow('summary', 'Resumen diario', 'Cuántos hábitos te faltan hoy.', p.summary, 'summaryTime', p.summaryTime)}
+      ${prefRow('streak', 'Racha en riesgo', 'Si a esa hora aún no completas el día.', p.streak, 'streakTime', p.streakTime)}
+    </div>
+    <div class="btn-col">
+      <button class="btn btn-ghost btn-block" data-action="notif-test">${icon('bell')}Enviar aviso de prueba</button>
+      <button class="link-btn notif-off" data-action="notif-disable">Desactivar en este iPhone</button>
+    </div>`;
+}
+
+let notifRender = 0;
+async function refreshNotifCard() {
+  if (!$('#notif-body')) return;
+  const ticket = ++notifRender;
+  const html = await notifCardHtml();
+  const body = $('#notif-body');
+  if (ticket === notifRender && body) body.innerHTML = html;
+}
+
+async function enableNotifications(btn) {
+  // iOS exige pedir el permiso en el mismo toque, antes de cualquier espera.
+  const asked = Notification.requestPermission();
+  btn.classList.add('is-busy');
+  try {
+    if ((await asked) !== 'granted') {
+      toast('Sin permiso no podemos avisarte. Puedes activarlo en Ajustes → Notificaciones.');
+      return;
+    }
+    const { publicKey } = await cloud.callFunction('public-key');
+    if (!publicKey) throw new Error('La función no entregó la llave pública. Revisa VAPID_PUBLIC_KEY en Supabase.');
+    const reg = await withTimeout(navigator.serviceWorker.ready, 5000);
+    let sub = await reg.pushManager.getSubscription();
+    const current = sub?.options?.applicationServerKey;
+    if (sub && current && bytesToB64u(new Uint8Array(current)) !== publicKey) { await sub.unsubscribe(); sub = null; }
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToBytes(publicKey) });
+    await cloud.savePushSubscription(sub.toJSON());
+    if (!state.settings.notif) state.settings = { ...state.settings, notif: { ...NOTIF_DEFAULTS } };
+    touchProfile(); // sube tu zona horaria y tus preferencias
+    commit();
+    toast('¡Notificaciones activadas! 🔔 Prueba con «Enviar aviso de prueba».');
+  } catch (err) {
+    toast(err.message || 'No se pudieron activar los avisos.');
+  } finally {
+    btn.classList.remove('is-busy');
+    refreshNotifCard();
+  }
+}
+
+function bytesToB64u(bytes) {
+  let bin = '';
+  bytes.forEach(b => { bin += String.fromCharCode(b); });
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function disableNotifications() {
+  if (!confirm('¿Desactivar los avisos en este iPhone?')) return;
+  const sub = await currentSubscription();
+  if (sub) {
+    try { await cloud.deletePushSubscription(sub.endpoint); } catch { /* se limpia solo después */ }
+    await sub.unsubscribe().catch(() => {});
+  }
+  toast('Avisos desactivados en este iPhone');
+  refreshNotifCard();
+}
+
+async function sendTestNotification(btn) {
+  btn.classList.add('is-busy');
+  try {
+    await cloud.callFunction('test');
+    toast('Aviso enviado. Debería llegarte en unos segundos 🔔');
+  } catch (err) {
+    toast(err.message || 'No se pudo enviar el aviso de prueba.');
+  } finally {
+    btn.classList.remove('is-busy');
+  }
+}
+
+function setNotifPref(key, value) {
+  state.settings = { ...state.settings, notif: { ...notifPrefs(), [key]: value } };
+  touchProfile();
+  commit();
+}
+
+// Al abrir la app, vuelve a registrar este iPhone por si Apple renovó su dirección de avisos.
+async function ensureSubscriptionSaved() {
+  if (!cloud.signedIn() || !pushSupported() || Notification.permission !== 'granted') return;
+  const sub = await currentSubscription();
+  if (sub) cloud.savePushSubscription(sub.toJSON()).catch(() => {});
 }
 
 /* ---------- Cuenta y sincronización ---------- */
@@ -1109,7 +1260,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), Math.max(2600, msg.length * 55));
 }
 
 function showTab(tab) {
@@ -1189,6 +1340,10 @@ const actions = {
   'acc-signin': () => accountAuth('signin'),
   'acc-signout': () => accountSignOut(),
   'acc-sync': async () => { await cloud.sync(); updateSyncUI(); },
+
+  'notif-enable': el => enableNotifications(el),
+  'notif-disable': () => disableNotifications(),
+  'notif-test': el => sendTestNotification(el),
 };
 
 document.addEventListener('click', e => {
@@ -1204,7 +1359,8 @@ document.addEventListener('input', e => {
     touchProfile();
     commit();
     $('#pf-avatar').textContent = initial(state.user.name);
-    $('#pf-reminder').textContent = reminderText(state.user.name);
+    const reminder = $('#pf-reminder');
+    if (reminder) reminder.textContent = reminderText(state.user.name);
     renderToday();
   }
   if (e.target.id === 'ed-title') {
@@ -1216,6 +1372,16 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#sheet-root').hidden) closeSheet();
   if (e.key === 'Enter' && e.target.id === 'onb-name') finishOnboarding();
   if (e.key === 'Enter' && ['pf-name', 'ed-title', 'acc-pass', 'onb-pass'].includes(e.target.id)) e.target.blur();
+});
+
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.matches?.('[data-pref]')) {
+    setNotifPref(t.dataset.pref, t.checked);
+    const time = t.closest('.pref')?.querySelector('[data-pref-time]');
+    if (time) time.disabled = !t.checked;
+  }
+  if (t.matches?.('[data-pref-time]') && /^\d{2}:\d{2}$/.test(t.value)) setNotifPref(t.dataset.prefTime, t.value);
 });
 
 $('#import-file').addEventListener('change', e => {
@@ -1263,7 +1429,7 @@ function init() {
     if ($('#account-card')?.dataset.mode !== mode && !isEditingProfile()) renderProfile();
     updateSyncUI();
   });
-  cloud.init();
+  cloud.init().then(() => { refreshNotifCard(); ensureSubscriptionSaved(); });
 
   // Pide al sistema que no borre los datos guardados.
   try { navigator.storage?.persist?.(); } catch { /* no soportado */ }
