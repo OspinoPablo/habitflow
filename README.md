@@ -10,6 +10,10 @@ Fase 1: funciona 100 % en tu teléfono, sin servidor y sin costo.
 | `index.html` | Estructura de la app e íconos |
 | `styles.css` | Diseño (modo oscuro) |
 | `app.js` | Toda la lógica: rutina, rachas, calendario, perfil, respaldos |
+| `sync.js` | Cuenta y sincronización con Supabase |
+| `config.js` | URL y clave publishable de tu proyecto de Supabase |
+| `vendor/supabase.js` | Librería oficial de Supabase (v2.117.3, licencia MIT) |
+| `supabase/01_esquema.sql` | Tablas y reglas de seguridad de la base de datos |
 | `sw.js` | Hace que funcione sin internet (y en la Fase 2, recibirá notificaciones) |
 | `manifest.webmanifest` | Nombre, colores e íconos de la app instalada |
 | `icons/` | Íconos para la pantalla de inicio |
@@ -37,11 +41,22 @@ O en VS Code, instala la extensión **Live Server** y haz clic en *Go Live*.
 
 ## Publicar cambios
 
-1. Edita los archivos y súbelos de nuevo a GitHub (reemplazando los anteriores).
-2. En `sw.js` cambia `VERSION` (por ejemplo `habitflow-v1.0.1`).
-3. En el iPhone, cierra y abre la app un par de veces para que tome la versión nueva.
+1. Edita los archivos y, en `sw.js`, sube el número de `VERSION` (por ejemplo `habitflow-v1.0.2`).
+2. Súbelos a GitHub con *Add file → Upload files* (reemplazan a los anteriores) y confirma con *Commit changes*.
+3. Espera la palomita verde en la pestaña *Actions* (1–2 minutos).
+4. Abre la app en el iPhone: detecta la versión nueva y se recarga sola. Revisa el número en Perfil.
 
-## Próximos pasos (Fase 2)
+Actualizar nunca borra tus hábitos ni tu racha.
 
-- Sincronización en la nube con **Supabase** (plan gratuito).
-- Notificaciones push reales con tu nombre a la hora de cada hábito (requiere iOS 16.4 o superior y la app instalada en inicio).
+## Sincronización (Fase 2)
+
+1. En Supabase, ejecuta `supabase/01_esquema.sql` en el SQL Editor.
+2. En `config.js` pega la Project URL y la clave **publishable** (`sb_publishable_…`). Nunca la secreta.
+3. En la app: Perfil → Cuenta y sincronización → Crear cuenta.
+4. En otro teléfono: en la bienvenida toca «¿Ya tienes cuenta? Inicia sesión».
+
+La app funciona sin internet y sube los cambios cuando vuelve la conexión. Si un dato cambió en dos lugares, gana el más reciente.
+
+## Próximo paso
+
+- Notificaciones push con tu nombre (requiere iOS 16.4 o superior y la app instalada en inicio).

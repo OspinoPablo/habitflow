@@ -1,12 +1,15 @@
 /* HabitFlow: service worker
    ⚠️ Cada vez que publiques cambios, sube el número de VERSION
    (1.0.1 → 1.0.2 → 1.0.3...). Así el iPhone sabe que hay una versión nueva. */
-const VERSION = 'habitflow-v1.0.1';
+const VERSION = 'habitflow-v1.1.0';
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
   './app.js',
+  './sync.js',
+  './config.js',
+  './vendor/supabase.js',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',

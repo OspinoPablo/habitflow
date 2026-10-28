@@ -94,10 +94,33 @@ const Store = {
 function freshState() {
   return {
     version: 1,
-    user: { name: '' },
-    tasks: [],   // { id, title, emoji, color, time, days, createdAt, deletedAt, order }
-    history: {}, // 'AAAA-MM-DD': { scheduled: [ids], done: [ids] }
+    user: { name: '', updatedAt: 0 },
+    settings: {}, // preferencias de avisos (Fase 2, etapa 3)
+    tasks: [],    // { id, title, emoji, color, time, days, createdAt, deletedAt, order, updatedAt }
+    history: {},  // 'AAAA-MM-DD': { scheduled: [ids], done: [ids], updatedAt }
     meta: { startDate: todayKey(), onboarded: false, installHintDismissed: false, updatedAt: Date.now() },
+    sync: freshSync(),
+  };
+}
+
+// Estado de la sincronización: con qué cuenta está ligado y qué falta por subir.
+function freshSync() {
+  return { userId: null, email: '', lastSyncAt: 0, needsFull: false, dirty: { profile: false, tasks: [], days: [] } };
+}
+
+function normalizeSync(s) {
+  const base = freshSync();
+  if (!s || typeof s !== 'object') return base;
+  return {
+    userId: typeof s.userId === 'string' ? s.userId : null,
+    email: String(s.email || ''),
+    lastSyncAt: Number(s.lastSyncAt) || 0,
+    needsFull: !!s.needsFull,
+    dirty: {
+      profile: !!s.dirty?.profile,
+      tasks: Array.isArray(s.dirty?.tasks) ? s.dirty.tasks.map(String) : [],
+      days: Array.isArray(s.dirty?.days) ? s.dirty.days.filter(isDateKey) : [],
+    },
   };
 }
 
@@ -113,6 +136,7 @@ function cleanTask(t) {
     createdAt: isDateKey(t.createdAt) ? t.createdAt : todayKey(),
     deletedAt: isDateKey(t.deletedAt) ? t.deletedAt : null,
     order: Number(t.order) || Date.now(),
+    updatedAt: Number(t.updatedAt) || 0,
   };
 }
 
@@ -126,12 +150,14 @@ function normalize(data) {
       history[k] = {
         scheduled: Array.isArray(rec.scheduled) ? rec.scheduled.map(String) : [],
         done: Array.isArray(rec.done) ? rec.done.map(String) : [],
+        updatedAt: Number(rec.updatedAt) || 0,
       };
     }
   }
   return {
     version: 1,
-    user: { name: String(data.user?.name || '').slice(0, 24) },
+    user: { name: String(data.user?.name || '').slice(0, 24), updatedAt: Number(data.user?.updatedAt) || 0 },
+    settings: data.settings && typeof data.settings === 'object' ? data.settings : {},
     tasks: Array.isArray(data.tasks) ? data.tasks.map(cleanTask) : [],
     history,
     meta: {
@@ -139,14 +165,40 @@ function normalize(data) {
       ...(data.meta || {}),
       startDate: isDateKey(data.meta?.startDate) ? data.meta.startDate : base.meta.startDate,
     },
+    sync: normalizeSync(data.sync),
   };
 }
 
 let state = normalize(Store.load());
 
+// Si sync.js no cargara, la app sigue funcionando sin nube.
+const cloud = typeof Cloud !== 'undefined' ? Cloud : {
+  init() {}, sync() {}, schedulePush() {}, on() {},
+  signUp: async () => ({ error: 'Sincronización no disponible.' }),
+  signIn: async () => ({ error: 'Sincronización no disponible.' }),
+  signOut: async () => {},
+  available: () => false, problem: () => 'Falta el archivo sync.js.', signedIn: () => false, email: () => '',
+  status: () => ({ phase: 'idle', error: '', lastSyncAt: 0, pending: 0 }),
+};
+
 function commit() {
   state.meta.updatedAt = Date.now();
   Store.save(state);
+  cloud.schedulePush();
+}
+
+// Cada cambio queda marcado con su hora y en la lista de pendientes por subir.
+function markDirty(kind, id) {
+  const list = state.sync.dirty[kind];
+  if (!list.includes(id)) list.push(id);
+}
+function touchTask(t) { t.updatedAt = Date.now(); markDirty('tasks', t.id); }
+function touchDay(key) { state.history[key].updatedAt = Date.now(); markDirty('days', key); }
+function touchProfile() { state.user.updatedAt = Date.now(); state.sync.dirty.profile = true; }
+function touchEverything() {
+  touchProfile();
+  state.tasks.forEach(touchTask);
+  Object.keys(state.history).forEach(touchDay);
 }
 
 /* ==========================================================
@@ -170,9 +222,15 @@ function scheduledIdsFor(key) {
 // mañana, los días pasados conservan lo que realmente tenían.
 function syncToday() {
   const key = todayKey();
-  const rec = state.history[key] || { scheduled: [], done: [] };
-  rec.scheduled = scheduledIdsFor(key);
+  const isNew = !state.history[key];
+  const rec = state.history[key] || { scheduled: [], done: [], updatedAt: 0 };
+  const scheduled = scheduledIdsFor(key);
+  const changed = isNew || !sameSet(rec.scheduled, scheduled);
+  rec.scheduled = scheduled;
   state.history[key] = rec;
+  // Solo marcar como pendiente: lo que cuenta como "más reciente" es lo que tú marcas,
+  // así abrir la app en otro teléfono no borra lo que completaste en este.
+  if (changed) markDirty('days', key);
 }
 
 /* Estados posibles de un día:
@@ -350,6 +408,7 @@ function toggleTask(id) {
   const i = rec.done.indexOf(id);
   if (i >= 0) rec.done.splice(i, 1);
   else rec.done.push(id);
+  touchDay(key);
   commit();
   lastToggled = id;
   const after = dayInfo(key).status;
@@ -545,8 +604,9 @@ function saveDraft() {
   if (!draft.days.length) { toast('Elige al menos un día'); return; }
   const data = { title, emoji: draft.emoji, color: draft.color, time: $('#ed-time').value || '', days: [...draft.days] };
   const isNew = !draft.id;
-  if (isNew) state.tasks.push(cleanTask({ id: uid(), ...data, createdAt: todayKey(), order: Date.now() }));
-  else Object.assign(taskById(draft.id), data);
+  const task = isNew ? cleanTask({ id: uid(), ...data, createdAt: todayKey(), order: Date.now() }) : Object.assign(taskById(draft.id), data);
+  if (isNew) state.tasks.push(task);
+  touchTask(task);
   syncToday();
   commit();
   closeSheet();
@@ -559,9 +619,13 @@ function deleteDraft() {
   if (!t) return;
   if (!confirm(`¿Eliminar «${t.title}»?\nLos días que ya pasaron conservan su historial.`)) return;
   const k = todayKey();
-  if (t.createdAt === k) state.tasks = state.tasks.filter(x => x.id !== t.id); // creado hoy: se borra por completo
-  else t.deletedAt = k;                                                       // si no, se archiva para el historial
-  if (state.history[k]) state.history[k].done = state.history[k].done.filter(id => id !== t.id);
+  t.deletedAt = k; // se archiva: los días anteriores lo siguen mostrando en el historial
+  touchTask(t);
+  const rec = state.history[k];
+  if (rec && rec.done.includes(t.id)) {
+    rec.done = rec.done.filter(id => id !== t.id);
+    touchDay(k);
+  }
   syncToday();
   commit();
   closeSheet();
@@ -696,6 +760,8 @@ function renderProfile() {
     </div>
     <p class="footnote profile-note">HabitFlow usa este nombre para saludarte y en tus recordatorios.</p>
 
+    ${accountCard()}
+
     <div class="card">
       <div class="card-head">${icon('bell')}<h2>Recordatorio diario</h2></div>
       <p class="card-text">Mientras llegan las notificaciones dentro de la app, crea un recordatorio con la app <b>Atajos</b> de tu iPhone. Es gratis y toma un minuto:</p>
@@ -710,7 +776,9 @@ function renderProfile() {
 
     <div class="card">
       <div class="card-head">${icon('cloud')}<h2>Tus datos</h2></div>
-      <p class="card-text">Todo se guarda en este iPhone. Exporta un respaldo de vez en cuando y guárdalo en iCloud Drive para no perder tu historial.</p>
+      <p class="card-text">${cloud.signedIn()
+        ? 'Tus datos se guardan en este iPhone y en la nube. El respaldo es una copia extra que puedes guardar en iCloud Drive.'
+        : 'Todo se guarda en este iPhone. Exporta un respaldo de vez en cuando y guárdalo en iCloud Drive para no perder tu historial.'}</p>
       <div class="btn-col">
         <button class="btn btn-ghost btn-block" data-action="export">${icon('download')}Exportar respaldo</button>
         <button class="btn btn-ghost btn-block" data-action="import">${icon('upload')}Restaurar respaldo</button>
@@ -718,7 +786,128 @@ function renderProfile() {
       </div>
     </div>
 
-    <p class="footnote center">HabitFlow <span id="pf-version">1.0</span>. Usándola desde el ${fmt(dateOf(state.meta.startDate), { day: 'numeric', month: 'long', year: 'numeric' })}, con ${activeN} ${activeN === 1 ? 'hábito activo' : 'hábitos activos'}.</p>`;
+    <p class="footnote center">HabitFlow <span id="pf-version">1.1</span>. Usándola desde el ${fmt(dateOf(state.meta.startDate), { day: 'numeric', month: 'long', year: 'numeric' })}, con ${activeN} ${activeN === 1 ? 'hábito activo' : 'hábitos activos'}.</p>`;
+}
+
+/* ---------- Cuenta y sincronización ---------- */
+function authFields(prefix) {
+  return `
+    <label class="field">
+      <span class="label">Correo</span>
+      <input class="input" id="${prefix}-email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" placeholder="tu@correo.com">
+    </label>
+    <label class="field">
+      <span class="label">Contraseña</span>
+      <input class="input" id="${prefix}-pass" type="password" autocomplete="current-password" placeholder="Mínimo 6 caracteres" enterkeyhint="done">
+    </label>
+    <p class="form-error" id="${prefix}-error" role="alert" hidden></p>`;
+}
+
+function accountCard() {
+  const head = `<div class="card-head">${icon('cloud')}<h2>Cuenta y sincronización</h2></div>`;
+  if (!cloud.available()) {
+    return `<div class="card" id="account-card" data-mode="off">${head}<p class="card-text">${esc(cloud.problem())}</p></div>`;
+  }
+  if (!cloud.signedIn()) {
+    return `
+      <div class="card" id="account-card" data-mode="out">
+        ${head}
+        <p class="card-text">Crea una cuenta para guardar tus hábitos en la nube y recuperarlos en otro teléfono o en tu computador.</p>
+        ${authFields('acc')}
+        <div class="btn-col">
+          <button class="btn btn-primary btn-block" data-action="acc-signup">Crear cuenta</button>
+          <button class="btn btn-ghost btn-block" data-action="acc-signin">Iniciar sesión</button>
+        </div>
+      </div>`;
+  }
+  return `
+    <div class="card" id="account-card" data-mode="in">
+      ${head}
+      <div class="sync-row">
+        <span class="sync-dot" id="sync-dot"></span>
+        <div class="sync-info"><strong>${esc(cloud.email())}</strong><span id="sync-status"></span></div>
+      </div>
+      <div class="btn-col">
+        <button class="btn btn-ghost btn-block" data-action="acc-sync">${icon('refresh')}Sincronizar ahora</button>
+        <button class="btn btn-ghost btn-block" data-action="acc-signout">Cerrar sesión</button>
+      </div>
+    </div>`;
+}
+
+function ago(ms) {
+  const s = (Date.now() - ms) / 1000;
+  if (s < 45) return 'hace un momento';
+  if (s < 3600) return `hace ${Math.round(s / 60)} min`;
+  if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+  return `el ${fmt(new Date(ms), { day: 'numeric', month: 'short' })}`;
+}
+
+function updateSyncUI() {
+  const status = $('#sync-status');
+  const dot = $('#sync-dot');
+  if (!status || !dot) return;
+  const s = cloud.status();
+  const pend = s.pending ? `${s.pending} ${s.pending === 1 ? 'cambio pendiente' : 'cambios pendientes'}` : '';
+  let text;
+  if (s.phase === 'syncing') text = 'Sincronizando…';
+  else if (s.phase === 'offline') text = `Sin conexión. ${pend ? `${pend}; se subirán` : 'Se sincronizará'} cuando vuelva el internet.`;
+  else if (s.phase === 'error') text = `No se pudo sincronizar: ${s.error}`;
+  else text = s.lastSyncAt ? `Sincronizado ${ago(s.lastSyncAt)}` : 'Aún sin sincronizar';
+  status.textContent = text;
+  dot.className = `sync-dot s-${s.phase === 'idle' && !s.lastSyncAt ? 'none' : s.phase}`;
+}
+
+const isEditingProfile = () => {
+  const a = document.activeElement;
+  return !!(a && a.matches?.('input, textarea') && a.closest('#view-profile'));
+};
+
+// Lee el formulario, valida y crea la cuenta o inicia sesión.
+async function submitAuth(mode, prefix) {
+  const email = $(`#${prefix}-email`).value.trim();
+  const pass = $(`#${prefix}-pass`).value;
+  const errEl = $(`#${prefix}-error`);
+  const box = errEl.parentElement;
+  const fail = msg => { errEl.textContent = msg; errEl.hidden = false; return false; };
+  errEl.hidden = true;
+  if (!/^\S+@\S+\.\S+$/.test(email)) return fail('Escribe un correo válido.');
+  if (pass.length < 6) return fail('La contraseña debe tener al menos 6 caracteres.');
+
+  const buttons = $$('.btn', box);
+  buttons.forEach(b => b.classList.add('is-busy'));
+  const res = mode === 'signup' ? await cloud.signUp(email, pass) : await cloud.signIn(email, pass);
+  buttons.forEach(b => b.classList.remove('is-busy'));
+
+  if (res.error) return fail(res.error);
+  if (res.needsConfirmation) return fail('Revisa tu correo para confirmar la cuenta, o desactiva «Confirm email» en Supabase.');
+  return true;
+}
+
+async function accountAuth(mode) {
+  const ok = await submitAuth(mode, 'acc');
+  if (!ok) return;
+  document.activeElement?.blur();
+  renderAll();
+  const s = cloud.status();
+  if (s.phase === 'idle') toast(mode === 'signup' ? 'Cuenta creada. Tus datos ya están en la nube ☁️' : 'Sesión iniciada. Datos sincronizados ☁️');
+  else toast('Sesión iniciada. La sincronización terminará cuando haya conexión.');
+}
+
+async function accountSignOut() {
+  if (!confirm('¿Cerrar sesión?\nTus datos se quedan en este teléfono y también en la nube.')) return;
+  await cloud.signOut();
+  renderAll();
+  toast('Sesión cerrada');
+}
+
+// Cuando llegan datos de la nube: recalcula hoy y vuelve a pintar sin interrumpirte si escribes.
+function refreshViews() {
+  renderToday();
+  renderRoutine();
+  renderCalendar();
+  if (!isEditingProfile()) renderProfile();
+  updateSyncUI();
+  showVersion();
 }
 
 async function copyReminder() {
@@ -765,8 +954,11 @@ async function importData(file) {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.tasks) || typeof data.history !== 'object') throw new Error('formato');
     if (!confirm('Esto reemplazará tus datos actuales por los del respaldo. ¿Continuar?')) return;
+    const keepSync = state.sync;
     state = normalize(data);
+    state.sync = keepSync;
     state.meta.onboarded = true;
+    touchEverything(); // lo restaurado gana también en la nube
     syncToday();
     commit();
     renderAll();
@@ -776,8 +968,12 @@ async function importData(file) {
   }
 }
 
-function resetAll() {
-  if (!confirm('¿Borrar todos tus hábitos, tu historial y tu racha? No se puede deshacer.')) return;
+async function resetAll() {
+  const msg = cloud.signedIn()
+    ? '¿Borrar los datos de este teléfono y cerrar sesión?\nTu copia en la nube se conserva: al volver a iniciar sesión se recupera.'
+    : '¿Borrar todos tus hábitos, tu historial y tu racha? No se puede deshacer.';
+  if (!confirm(msg)) return;
+  await cloud.signOut();
   Store.clear();
   state = freshState();
   lastRing = 0;
@@ -816,6 +1012,7 @@ function renderOnboarding() {
       </div>
 
       <button class="btn btn-primary btn-block" data-action="onb-start">Comenzar</button>
+      ${cloud.available() ? '<button class="link-btn onb-login" data-action="onb-login">¿Ya tienes cuenta? Inicia sesión</button>' : ''}
     </div>`;
   el.hidden = false;
   document.body.classList.add('locked');
@@ -826,16 +1023,25 @@ function finishOnboarding() {
   if (!name) { toast('Escribe tu nombre para empezar'); $('#onb-name').focus(); return; }
   const k = todayKey();
   state.user.name = name;
-  state.meta.startDate = k;
+  touchProfile();
+  if (!state.sync.userId) state.meta.startDate = k;
   state.meta.onboarded = true;
   $$('.starter.sel').forEach((b, idx) => {
     const s = STARTERS[Number(b.dataset.i)];
-    state.tasks.push(cleanTask({ ...s, id: uid(), days: [...ALL_DAYS], createdAt: k, order: Date.now() + idx }));
+    const t = cleanTask({ ...s, id: uid(), days: [...ALL_DAYS], createdAt: k, order: Date.now() + idx });
+    state.tasks.push(t);
+    touchTask(t);
   });
   syncToday();
   commit();
   renderAll();
+  closeOnboarding();
+  toast(`¡Hola, ${name}! Tu racha empieza hoy 🔥`);
+}
+
+function closeOnboarding() {
   const el = $('#onboarding');
+  if (el.hidden) return;
   el.classList.add('leaving');
   setTimeout(() => {
     el.hidden = true;
@@ -843,7 +1049,37 @@ function finishOnboarding() {
     el.innerHTML = '';
     document.body.classList.remove('locked');
   }, 350);
-  toast(`¡Hola, ${name}! Tu racha empieza hoy 🔥`);
+}
+
+// En un teléfono nuevo: iniciar sesión en vez de empezar de cero.
+function renderOnboardingLogin() {
+  $('#onboarding').innerHTML = `
+    <div class="onb-inner">
+      <div class="onb-logo">${flameSvg()}</div>
+      <h1 class="onb-title">Hola de nuevo</h1>
+      <p class="onb-sub">Inicia sesión para recuperar tus hábitos, tu historial y tu racha.</p>
+      ${authFields('onb')}
+      <div class="btn-col">
+        <button class="btn btn-primary btn-block" data-action="onb-signin">Iniciar sesión</button>
+        <button class="btn btn-ghost btn-block" data-action="onb-back">Volver</button>
+      </div>
+    </div>`;
+}
+
+async function onboardingSignIn() {
+  const ok = await submitAuth('signin', 'onb');
+  if (!ok) return;
+  if (state.user.name) {
+    state.meta.onboarded = true;
+    syncToday();
+    commit();
+    renderAll();
+    closeOnboarding();
+    toast(`¡Hola de nuevo, ${state.user.name}! 🔥`);
+  } else {
+    renderOnboarding();
+    toast('Tu cuenta aún no tiene datos. Completa la bienvenida.');
+  }
 }
 
 /* ==========================================================
@@ -887,6 +1123,7 @@ function renderAll() {
   renderRoutine();
   renderCalendar();
   renderProfile();
+  updateSyncUI();
   showVersion();
 }
 
@@ -944,6 +1181,14 @@ const actions = {
 
   'onb-toggle': el => { const on = el.classList.toggle('sel'); el.setAttribute('aria-pressed', on); },
   'onb-start': () => finishOnboarding(),
+  'onb-login': () => renderOnboardingLogin(),
+  'onb-back': () => renderOnboarding(),
+  'onb-signin': () => onboardingSignIn(),
+
+  'acc-signup': () => accountAuth('signup'),
+  'acc-signin': () => accountAuth('signin'),
+  'acc-signout': () => accountSignOut(),
+  'acc-sync': async () => { await cloud.sync(); updateSyncUI(); },
 };
 
 document.addEventListener('click', e => {
@@ -956,6 +1201,7 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   if (e.target.id === 'pf-name') {
     state.user.name = e.target.value.trim().slice(0, 24);
+    touchProfile();
     commit();
     $('#pf-avatar').textContent = initial(state.user.name);
     $('#pf-reminder').textContent = reminderText(state.user.name);
@@ -969,7 +1215,7 @@ document.addEventListener('input', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !$('#sheet-root').hidden) closeSheet();
   if (e.key === 'Enter' && e.target.id === 'onb-name') finishOnboarding();
-  if (e.key === 'Enter' && (e.target.id === 'pf-name' || e.target.id === 'ed-title')) e.target.blur();
+  if (e.key === 'Enter' && ['pf-name', 'ed-title', 'acc-pass', 'onb-pass'].includes(e.target.id)) e.target.blur();
 });
 
 $('#import-file').addEventListener('change', e => {
@@ -993,7 +1239,7 @@ function checkNewDay() {
   renderAll();
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkNewDay(); });
-setInterval(checkNewDay, 60 * 1000);
+setInterval(() => { checkNewDay(); updateSyncUI(); }, 60 * 1000);
 
 /* ---------- Arranque ---------- */
 function init() {
@@ -1001,6 +1247,23 @@ function init() {
   if (state.meta.onboarded) commit();
   renderAll();
   if (!state.meta.onboarded) renderOnboarding();
+
+  // Nube: al llegar datos se recalcula y se vuelve a pintar; el estado se muestra en Perfil.
+  cloud.on('data', () => {
+    syncToday();
+    if (!state.meta.onboarded && state.user.name && $('#onboarding .onb-login') ) {
+      state.meta.onboarded = true;
+      closeOnboarding();
+    }
+    Store.save(state);
+    refreshViews();
+  });
+  cloud.on('status', () => {
+    const mode = !cloud.available() ? 'off' : cloud.signedIn() ? 'in' : 'out';
+    if ($('#account-card')?.dataset.mode !== mode && !isEditingProfile()) renderProfile();
+    updateSyncUI();
+  });
+  cloud.init();
 
   // Pide al sistema que no borre los datos guardados.
   try { navigator.storage?.persist?.(); } catch { /* no soportado */ }

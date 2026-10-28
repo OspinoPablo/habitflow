@@ -731,3 +731,17 @@ input[type="time"]::-webkit-date-and-time-value { text-align: left; }
   }
 }
 .subtitle .flame { vertical-align: -2px; }
+
+/* ---------- Cuenta y sincronización (Fase 2) ---------- */
+.form-error { margin: -8px 4px 16px; font-size: 14px; line-height: 1.4; color: #FF9BA5; }
+.sync-row { display: flex; align-items: center; gap: 12px; margin: 6px 0 16px; }
+.sync-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sync-info strong { font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sync-info span { font-size: 13.5px; line-height: 1.4; color: var(--humo); }
+.sync-dot { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--polvo); }
+.sync-dot.s-idle { background: #4ADE80; box-shadow: 0 0 0 4px rgba(74, 222, 128, .14); }
+.sync-dot.s-syncing { background: var(--llama); animation: pulse 1s ease-in-out infinite; }
+.sync-dot.s-error { background: var(--error); }
+@keyframes pulse { 50% { opacity: .3; } }
+.btn.is-busy { opacity: .55; pointer-events: none; }
+.link-btn.onb-login { display: block; margin: 20px auto 0; padding: 8px; font-size: 15px; }
