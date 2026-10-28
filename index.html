@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>HabitFlow</title>
+  <meta name="description" content="Tu rutina diaria con rachas.">
+  <meta name="theme-color" content="#100D12">
+  <meta name="color-scheme" content="dark">
+
+  <!-- Modo app en iPhone (al agregarla a la pantalla de inicio) -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HabitFlow">
+  <meta name="format-detection" content="telephone=no">
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Íconos SVG reutilizables -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="g-flame" x1="0" y1="1" x2="0" y2="0">
+        <stop offset="0" stop-color="#FF4A1C"/>
+        <stop offset=".55" stop-color="#FF9A3C"/>
+        <stop offset="1" stop-color="#FFD27A"/>
+      </linearGradient>
+      <linearGradient id="g-ring" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#FFD27A"/>
+        <stop offset=".5" stop-color="#FF9A3C"/>
+        <stop offset="1" stop-color="#FF4A1C"/>
+      </linearGradient>
+    </defs>
+    <symbol id="i-flame" viewBox="0 0 24 24">
+      <path fill="url(#g-flame)" d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>
+      <path fill="#FFE6B0" opacity=".92" d="M12 21.2c-2 0-3.4-1.4-3.4-3.2 0-1.5 1-2.6 1.9-3.5.3 1 1 1.7 1.9 2 0-1.2.4-2.2 1.2-2.9 1 1.1 1.7 2.4 1.7 3.9 0 2.1-1.4 3.7-3.3 3.7z"/>
+    </symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M3 6h.01M3 12h.01M3 18h.01M8 6h13M8 12h13M8 18h13"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><path d="M8 2v4M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14M12 5v14"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8M16 6l-4-4-4 4M12 2v13"/></symbol>
+  </svg>
+
+  <div id="app">
+    <main id="main">
+      <section class="view active" id="view-today" aria-label="Hoy"></section>
+      <section class="view" id="view-routine" aria-label="Rutina"></section>
+      <section class="view" id="view-calendar" aria-label="Calendario"></section>
+      <section class="view" id="view-profile" aria-label="Perfil"></section>
+    </main>
+
+    <nav class="tabbar" aria-label="Secciones">
+      <button class="tab active" data-action="tab" data-tab="today"><svg class="ic"><use href="#i-sun"/></svg><span>Hoy</span></button>
+      <button class="tab" data-action="tab" data-tab="routine"><svg class="ic"><use href="#i-list"/></svg><span>Rutina</span></button>
+      <button class="tab" data-action="tab" data-tab="calendar"><svg class="ic"><use href="#i-calendar"/></svg><span>Calendario</span></button>
+      <button class="tab" data-action="tab" data-tab="profile"><svg class="ic"><use href="#i-user"/></svg><span>Perfil</span></button>
+    </nav>
+  </div>
+
+  <!-- Hoja inferior (editor de hábitos y detalle del día) -->
+  <div id="sheet-root" class="sheet-root" hidden>
+    <div class="sheet-backdrop" data-action="close-sheet"></div>
+    <div class="sheet" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <div id="onboarding" class="onboarding" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="import-file" accept="application/json,.json" class="visually-hidden" tabindex="-1">
+
+  <script src="app.js"></script>
+</body>
+</html>
