@@ -1,7 +1,7 @@
 /* HabitFlow: service worker
-   Cada vez que publiques cambios, sube el número de VERSION
-   para que el iPhone descargue la versión nueva. */
-const VERSION = 'habitflow-v1.0.0';
+   ⚠️ Cada vez que publiques cambios, sube el número de VERSION
+   (1.0.1 → 1.0.2 → 1.0.3...). Así el iPhone sabe que hay una versión nueva. */
+const VERSION = 'habitflow-v1.0.1';
 const ASSETS = [
   './',
   './index.html',
@@ -15,7 +15,10 @@ const ASSETS = [
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(VERSION).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(VERSION)
+      // cache: 'reload' obliga a descargar los archivos nuevos y no copias viejas guardadas por el navegador
+      .then(cache => cache.addAll(ASSETS.map(url => new Request(url, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
   );
 });
 
@@ -33,7 +36,8 @@ self.addEventListener('fetch', event => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
 
-  const network = fetch(req)
+  // cache: 'no-cache' pregunta siempre al servidor si hay una versión más nueva
+  const network = fetch(req.url, { cache: 'no-cache' })
     .then(async res => {
       if (res && res.ok) {
         const copy = res.clone();

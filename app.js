@@ -718,7 +718,7 @@ function renderProfile() {
       </div>
     </div>
 
-    <p class="footnote center">HabitFlow 1.0. Usándola desde el ${fmt(dateOf(state.meta.startDate), { day: 'numeric', month: 'long', year: 'numeric' })}, con ${activeN} ${activeN === 1 ? 'hábito activo' : 'hábitos activos'}.</p>`;
+    <p class="footnote center">HabitFlow <span id="pf-version">1.0</span>. Usándola desde el ${fmt(dateOf(state.meta.startDate), { day: 'numeric', month: 'long', year: 'numeric' })}, con ${activeN} ${activeN === 1 ? 'hábito activo' : 'hábitos activos'}.</p>`;
 }
 
 async function copyReminder() {
@@ -887,6 +887,17 @@ function renderAll() {
   renderRoutine();
   renderCalendar();
   renderProfile();
+  showVersion();
+}
+
+// Muestra en Perfil la versión instalada (la toma del nombre de la caché, p. ej. habitflow-v1.0.1).
+async function showVersion() {
+  try {
+    const keys = await caches.keys();
+    const current = keys.filter(k => k.startsWith('habitflow-v')).sort().pop();
+    const el = $('#pf-version');
+    if (current && el) el.textContent = current.replace('habitflow-v', 'v');
+  } catch { /* sin acceso a la caché */ }
 }
 
 /* ---------- Acciones (un solo listener para toda la app) ---------- */
@@ -996,7 +1007,22 @@ function init() {
 
   // Service worker: permite usar la app sin internet (y en la Fase 2, recibir notificaciones).
   if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
-    navigator.serviceWorker.register('./sw.js').catch(err => console.warn('Service worker no registrado', err));
+    // Si ya había una versión instalada y llega una nueva, la app se recarga sola una vez.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      location.reload();
+    });
+
+    navigator.serviceWorker.register('./sw.js')
+      .then(reg => {
+        // iOS deja la app en segundo plano: al volver a ella, busca actualizaciones.
+        document.addEventListener('visibilitychange', () => { if (!document.hidden) reg.update().catch(() => {}); });
+        navigator.serviceWorker.ready.then(showVersion);
+      })
+      .catch(err => console.warn('Service worker no registrado', err));
   }
 }
 
